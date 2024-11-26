@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PayArc Payment Token - Demo</title>
+    <link href="css/style.css" rel="stylesheet"> <!-- Linking external CSS for styling -->
+    
+    <script>
+        // Default PayArc API Key (you should replace this with your actual API key if needed)
+        let PAYARC_API_KEY = "123456";  
+
+        // Callback object for handling the response from PayArc after token generation
+        const PAYARC_TOKEN_CALLBACK = {
+            success: (obj) => {  // This function is called when the token is successfully generated
+                const response = obj; // Parse the response from PayArc
+                const responseTag = document.getElementById('card-token'); // Find the div to display the token
+                if (responseTag) {
+                    responseTag.textContent = response.token; // Display the generated token
+                    responseTag.hidden = false; // Make the token visible
+                }
+                console.log(response.card); // Log the card details for debugging
+                showStatus('SUCCESS! Token is available.', 'status-success'); // Show success message
+            },
+            error: (obj) => {  // This function is called if there’s an error in token generation
+                const statusResponse = `ERROR! ${obj.status} ${obj.statusText}`; // Create an error message
+                showStatus(statusResponse, 'status-error'); // Show the error message
+                if (obj.status !== 422) {  // Check if the error status is not 422 (unprocessable entity)
+                    alert('There is an error from the payment gateway. Correct it and try again.'); // Alert user to fix the error
+                }
+            }
+        };
+
+        // Initial values for the PayArc tokenization process
+        const PAYARC_INITIAL_VALUES = {
+            FORM_STATUS: 'form-status',  // ID for form status display
+            INITIATE_PAYMENT: 'initiate-payment',  // ID for the payment initiation button
+            FIELDS_CONTAINER: 'card-token-container',  // ID for the container of the card fields
+            TOKEN_CALLBACK: PAYARC_TOKEN_CALLBACK  // Callback object for handling the response
+        };
+
+        // Function to get client ID and open modal
+        function openPaymentModal() {
+            const clientId = document.getElementById('client-id').value;  // Get the value from the client ID input field
+            
+            if (clientId) {
+                // Log the client ID to verify it's being captured
+                console.log('Client ID:', clientId);  
+                
+                // Optionally, set the client ID to PayArc API Key or use it for any custom logic
+                PAYARC_API_KEY = clientId; // Here we set the client ID as the API Key (for example purposes)
+
+                // Now open the modal and show the card fields
+                document.getElementById('myModal').style.display = 'block'; // Show the modal
+                initializePayArcCardFields(); // Initialize the PayArc card fields inside the modal
+            } else {
+                alert('Please enter your Client ID before proceeding.');
+            }
+        }
+
+        // Function to initialize the PayArc iframe fields inside the modal
+        function initializePayArcCardFields() {
+            // Initialize the PayArc iframe fields (card number, expiration, CVV, zip code)
+            const container = document.getElementById('card-token-container');
+            
+            // These elements will be populated dynamically by the PayArc iframeprocess.js
+            const cardNumberDiv = document.getElementById('credit-card-number');
+            const expDateDiv = document.getElementById('credit-card-exp');
+            const cvvDiv = document.getElementById('credit-card-cvv');
+            const zipCodeDiv = document.getElementById('credit-card-zip');  // Zip code field
+            
+            // In case the PayArc iframe library hasn't been loaded yet, ensure we call it here:
+            initPayarcTokenizer(PAYARC_API_KEY, PAYARC_INITIAL_VALUES);
+        }
+
+        // Function to initialize the PayArc tokenizer (field setup, iframe setup)
+        function initPayarcTokenizer(api_key, payarcInitialValues) {
+            let usedValues = {};
+
+            Object.keys(payarcInitialValues).forEach((v) => {
+                usedValues[v] = payarcInitialValues[v] || payarcInitialDefaultValues[v];
+            });
+
+            const fieldContainer = document.getElementById(usedValues.FIELDS_CONTAINER);
+            const payarcFormStatusObject = document.getElementById(usedValues.FORM_STATUS);
+            const payarcInitiatePaymentObject = document.getElementById(usedValues.INITIATE_PAYMENT);
+
+            if (!fieldContainer) {
+                console.error('Please, set fields container!');
+                return;
+            }
+
+            const tokenizerFields = Array.from(fieldContainer.querySelectorAll('[data-payarc]'));
+
+            if (tokenizerFields.length > 5) {
+                throw new Error('Please, use less than 6 fields!'); // Adjusting for 5 fields
+            }
+
+            if (
+                typeof usedValues.TOKEN_CALLBACK === 'object' &&
+                usedValues.TOKEN_CALLBACK !== null &&
+                !Array.isArray(usedValues.TOKEN_CALLBACK)
+            ) {
+                Object.assign(callbacks, { "get-token": usedValues.TOKEN_CALLBACK });
+            }
+
+            // Initialize XMLHttpRequest for fetching the iframe
+            let xhr = new XMLHttpRequest();
+            xhr.open(
+                'GET',
+                `https://testportal.payarc.net/v1/get-iframe?user=${api_key}&fields=${JSON.stringify(tokenizerFields.map(x => {
+                    return {
+                        pl: encodeURIComponent(x.dataset.placeholder),
+                        id: encodeURIComponent(x.id),
+                        type: x.dataset.payarc
+                    };
+                }))}`,
+                true
+            );
+
+            xhr.onload = function () {
+                if (xhr.status === 200) {
+                    // Successful response
+                    console.log('Iframe initialized:', xhr.responseText);
+                    // You may want to process the iframe data here and render it on your page
+                } else {
+                    console.error('Error loading iframe:', xhr.status, xhr.statusText);
+                }
+            };
+            
+            xhr.onerror = function () {
+                console.error('Network error occurred while fetching iframe.');
+            };
+
+            xhr.send();
+        }
+
+        // Function to get the PayArc token (UUID)
+        function getPayarcToken(button) {
+            const fields = document.querySelectorAll('#card-token-container [data-payarc]');
+            let formData = {};
+            fields.forEach(field => {
+                formData[field.id] = field.value; // Gather card field data
+            });
+
+            // Capture zip code (newly added field)
+            formData.zip = document.getElementById('credit-card-zip').value; // Get the zip code value
+
+            // Call PayArc API to generate the token using a POST request
+            fetch('https://testportal.payarc.net/v1/tokenize', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${PAYARC_API_KEY}` // Include your API key as Bearer token
+                },
+                body: JSON.stringify(formData)  // Send the card details as JSON, including the zip code
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.token) {  // Ensure token is returned
+                    document.getElementById('card-token').textContent = data.token;  // Display the token
+                    document.getElementById('card-token').hidden = false;  // Make the token visible
+                    showStatus('SUCCESS! Token is available.', 'status-success');  // Show success message
+                } else {
+                    showStatus('ERROR! Failed to generate token.', 'status-error');  // Display error if no token is returned
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showStatus('ERROR! An error occurred during tokenization.', 'status-error');  // Handle fetch errors
+            });
+        }
+
+        // Function to display status messages on the page
+        function showStatus(message, className) {
+            const statusElement = document.getElementById('form-status');
+            if (statusElement) {
+                statusElement.textContent = message; // Set the message text
+                statusElement.className = className; // Set the appropriate class for styling (success or error)
+            }
+        }
+    </script>
+
+    <!-- Load the PayArc iframe process script that manages card input fields and tokenization -->
+    <script src="https://testportal.payarc.net/js/iframeprocess.js" defer></script>
+
+    <style id="payarc-styles">
+        /*if you want to override look and fill of payarc iframes update styles below*/
+        /*using the exact same style name*/
+        /*example styles:*/
+
+        .payarc-all {
+            box-sizing: border-box;
+        }
+
+        .payarc-input {
+            width: 100%;
+            padding: 12px;
+            border-radius: 4px;
+            resize: vertical;
+        }
+
+        .payarc-label {
+            display: none;
+        }
+
+        .payarc-input:hover {
+            background-color: lightblue;
+        }
+
+        .payarc-container {
+            border-radius: 5px;
+            /*background-color: #f2f2f2;*/
+            background-color: transparent;
+            /*padding: 20px;*/
+        }
+
+        .payarc-label-container {
+            float: left;
+            width: 25%;
+        }
+
+        .payarc-input-container {
+            float: left;
+            width: 55%;
+            margin-top: 6px;
+        }
+
+        .payarc-row:after {
+            content: "";
+            display: table;
+            clear: both;
+        }
+
+        .payarc-input-default {
+            color: black;
+            font-size: 14px;
+            border-style: solid;
+            border-width: 1px;
+            border-color: gray;
+        }
+
+        .payarc-input-success {
+            color: #5cb85c;
+            font-size: 14px;
+            border-style: solid;
+            border-width: 1px;
+            border-color: #5cb85c;
+        }
+
+        .payarc-input-error {
+            color: #d9534f;
+            font-size: 14px;
+            border-style: solid;
+            border-width: 1px;
+            border-color: #d9534f;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Client ID Input Field -->
+    <label for="client-id">Enter Client ID:</label>
+    <input type="text" id="client-id" placeholder="Enter your Client ID here">
+    
+    <!-- Button to open the modal (which contains the card input form) -->
+    <button id="myBtn" onclick="openPaymentModal()">Open Modal</button>
+
+    <!-- Modal (popup) to collect card details -->
+    <div id="myModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>PayArc Demo Form Modal</h2> <!-- Title of the modal -->
+            </div>
+            <div class="modal-body">
+                <!-- Table to arrange card input fields (number, expiration, CVV, and zip code) -->
+                <table id="card-token-container">
+                    <tr>
+                        <td colspan="2">
+                            <!-- Card Number input field created by PayArc -->
+                            <div id="credit-card-number" data-payarc="CARD_NUMBER" data-placeholder="Card Number"></div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <!-- Expiration date input field (MM/YY) created by PayArc -->
+                            <div id="credit-card-exp" data-payarc="EXP" data-placeholder="MM/YY"></div>
+                        </td>
+                        <td>
+                            <!-- CVV input field created by PayArc -->
+                            <div id="credit-card-cvv" data-payarc="CVV" data-placeholder="CVV"></div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="2">
+                            <!-- Zip Code input field (new field) -->
+                            <div id="credit-card-zip" data-payarc="ZIP" data-placeholder="Zip Code"></div>
+                        </td>
+                    </tr>
+                </table>
+                
+                <!-- Button to initiate token generation when card details are entered -->
+                <button id="initiate-payment" onclick="getPayarcToken(this)">Generate Token</button>
+
+                <!-- Form status and token display area -->
+                <div id="form-status"></div> <!-- Displays the status of the form (error/success) -->
+                <div id="card-token" hidden></div> <!-- Displays the generated token (hidden initially) -->
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
