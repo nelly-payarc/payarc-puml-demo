@@ -1,0 +1,29 @@
+@startuml
+!theme cerulean
+
+entity  "Charges API" as ChargesAPI
+participant "ISV" as ISV
+entity "Token API" as TokenAPI
+
+ISV -> TokenAPI : 1. Initiate Tokenization Request\n(card number, exp, CVV)
+note over ISV
+  Step 1: Tokenize Card
+  - Token API generates a token
+  - Token used only once
+end note
+
+TokenAPI -> TokenAPI : 2. Generate Token (POST [[https://docs.payarc.net/reference/create-a-token /v1/tokens]])
+TokenAPI -> ISV : 3. Return Token ID (8YmNlwY0qY0mwEq0)
+
+ISV -> ChargesAPI : 4. Initiate Charge Request\n(amount: 1201, token ID: 8YmNlwY0qY0mwEq0)
+note over ISV
+  Step 2: Create Charge
+  - Use Token to charge the card
+  - Capture the payment immediately
+end note
+
+ChargesAPI <- ChargesAPI : 5. Create Charge (POST [[https://docs.payarc.net/reference/create-a-charge-keyed /v1/chargesAPI]])\nwith Token ID
+ChargesAPI <- ChargesAPI : 6. Capture Payment (capture = 1)
+ChargesAPI -> ISV : 7. Return Charge Details (Charge ID, Amount Captured)
+
+@endumlfd
